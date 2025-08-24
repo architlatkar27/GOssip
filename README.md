@@ -1,6 +1,8 @@
 # GOssip - A Modern Message Broker in Go
 
-GOssip is a high-performance, cloud-native message broker built in Go, designed to address the limitations of Apache Kafka while maintaining compatibility with its core concepts.
+I built this message broker in Golang for fun. Also to learn how things work on the low-level. On the way maybe it might become a better broker than Kafka but lets see about that. 
+
+Also a note - A lot of the project has AI involvement - not in direct coding because that would defeat the purpose of the project for me, but in terms of creating broilerplate code and reviewing design patterns etc. 
 
 ## 🎯 Design Goals
 
