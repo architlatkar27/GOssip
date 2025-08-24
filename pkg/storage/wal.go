@@ -28,10 +28,10 @@ type FileBasedWALWriter struct {
     currentIndex int64
     lastSync     time.Time
     
-    // Background sync
-    syncTicker *time.Ticker
-    stopCh     chan struct{}
-    wg         sync.WaitGroup
+    // Background sync - flush the file to disk
+    syncTicker *time.Ticker // This keeps performing flush every X seconds
+    stopCh     chan struct{} // A message on this channel will stop the above ticker
+    wg         sync.WaitGroup // 
     
     // Metrics
     entriesWritten int64
@@ -77,8 +77,59 @@ func newFileBasedWALWriter(config *StorageConfig) (*FileBasedWALWriter, error) {
 
 	instance.file = file
 	instance.filePath = filePath
+
+	// Recover current index from existing file
+    if err := instance.recoverIndex(); err != nil {
+        file.Close()
+        return nil, fmt.Errorf("failed to recover WAL index: %w", err)
+    }
+    
+    // Start background sync routine
+    instance.backgroundFlushRoutine()
+    
+    return &instance, nil
 }
 
+
+func(w *FileBasedWALWriter) shouldSync() bool {
+	// if time has passed since last sync then return true
+	return time.Since(w.lastSync) > w.config.WALSyncInterval
+}
+
+func(w *FileBasedWALWriter) flushFileToDisk() error {
+	if err := w.writer.Flush(); err != nil {
+		return err
+	}
+
+	if err := w.file.Sync(); err != nil {
+		return err
+	}
+
+	w.lastSync = time.Now()
+	w.syncCount++
+	return nil
+}
+
+func(w *FileBasedWALWriter) backgroundFlushRoutine() {
+	w.syncTicker = time.NewTicker(w.config.WALSyncInterval)
+	w.wg.Add(1)
+
+	go func() {
+		defer w.wg.Done()
+		defer w.syncTicker.Stop()
+
+		for {
+			select {
+			case <-w.syncTicker.C:
+				w.mu.Lock()
+				w.flushFileToDisk()
+				w.mu.Unlock()
+			case <-w.stopCh:
+				return
+			}
+		}
+	}()
+}
 // WALEntry represents a single WAL entry
 type WALEntry struct {
 	Index     int64     `json:"index"`
