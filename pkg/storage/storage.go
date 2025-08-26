@@ -201,9 +201,6 @@ type WAL interface {
 	// Get the latest index
 	LatestIndex(ctx context.Context) (int64, error)
 
-	// Truncate WAL to a specific index
-	Truncate(ctx context.Context, index int64) error
-
 	// Sync WAL to disk
 	Sync(ctx context.Context) error
 

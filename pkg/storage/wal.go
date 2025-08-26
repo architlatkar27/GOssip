@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bufio"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -228,4 +229,89 @@ func(w *FileBasedWALWriter) recoverIndex() (int64, error) {
 
 // Start implementing the interface
 
+func(w *FileBasedWALWriter) Append(ctx context.Context, entry *WALEntry) error {
+	// add metadata
+	// serialize the wal entry 
+	// increment the index
+	// if force sync then run the sync once
+	// do all this while acquiring lock
+	w.mu.Lock()
+	defer w.mu.Unlock()
 
+	w.currentIndex++
+	entry.Index = w.currentIndex
+	entry.Timestamp = time.Now()
+
+	data, err := w.serializeEntry(entry)
+	if err != nil {
+		return fmt.Errorf("failed to serialize wal entry: %v", err)
+	}
+
+	if _, err := w.writer.Write(data); err != nil {
+		return fmt.Errorf("failed to write WAL entry: %v", err)
+	}
+
+	w.entriesWritten++
+	w.bytesWritten += int64(len(data))
+
+	if w.shouldSync() {
+		if err := w.flushFileToDisk(); err != nil {
+			return fmt.Errorf("failed to flush WAL to disk: %v", err)
+		}
+	}
+	return nil
+}
+
+func(w *FileBasedWALWriter) Read(ctx context.Context, startIndex int64, maxEntries int32) ([]*WALEntry, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	file, err := os.Open(w.filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error while reading WAL file: %v", err)
+	}
+	defer file.Close()
+
+	var entryList []*WALEntry
+	reader := bufio.NewReader(file)
+
+	for len(entryList) < int(maxEntries) {
+		entry, err := w.deserializeEntry(reader)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to read WAL entry: %v", err)
+		}
+		if entry.Index < startIndex {
+			continue
+		}
+		entryList = append(entryList, entry)
+	}
+	return entryList, nil
+}
+
+func(w *FileBasedWALWriter) LatestIndex(ctx context.Context) (int64, error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.currentIndex, nil
+}
+
+func(w *FileBasedWALWriter) Sync(ctx context.Context) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.flushFileToDisk()
+}
+
+func(w *FileBasedWALWriter) Close() error {
+	close(w.stopCh)
+	w.wg.Wait()
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if err := w.flushFileToDisk(); err != nil {
+		return err
+	}
+	return w.file.Close()
+}
