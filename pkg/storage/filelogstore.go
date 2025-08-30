@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/gossip-broker/gossip/pkg/types"
 )
-
-
-
 
 type FileLogStore struct {
 	segmentStore SegmentStore
@@ -42,8 +41,6 @@ func(fls *FileLogStore) Append(ctx context.Context, topic string, partition int3
 	if fls.closed{
 		return fmt.Errorf("log store is closed")
 	}
-
-	segment, err := fls.getOr
 
 	return nil
 }

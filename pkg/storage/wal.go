@@ -92,7 +92,8 @@ func newFileBasedWALWriter(config *StorageConfig) (*FileBasedWALWriter, error) {
 
 	instance.file = file
 	instance.filePath = filePath
-
+	instance.writer = bufio.NewWriter(file)
+	instance.stopCh = make(chan struct{})
 	// Recover current index from existing file
 	currentIndex, err := instance.recoverIndex()
     if err != nil {
@@ -194,6 +195,7 @@ func(w *FileBasedWALWriter) deserializeEntry(reader *bufio.Reader) (*WALEntry, e
 	if checksum != originalChecksum {
 		return nil, fmt.Errorf("checksum does not match")
 	}
+	entry.Checksum = originalChecksum
 
 	return &entry, nil
 }

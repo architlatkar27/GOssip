@@ -44,51 +44,6 @@ type LogStore interface {
 	Close() error
 }
 
-// SegmentStore manages individual log segments
-type SegmentStore interface {
-	// Create a new segment
-	CreateSegment(topic string, partition int32, baseOffset int64) (Segment, error)
-
-	// Open an existing segment
-	OpenSegment(topic string, partition int32, baseOffset int64) (Segment, error)
-
-	// List all segments for a topic partition
-	ListSegments(topic string, partition int32) ([]SegmentInfo, error)
-
-	// Delete a segment
-	DeleteSegment(topic string, partition int32, baseOffset int64) error
-
-	// Close all segments
-	Close() error
-}
-
-// Segment represents a single log segment
-type Segment interface {
-	// Append messages to the segment
-	Append(messages []*types.Message) error
-
-	// Read messages from the segment
-	Read(offset int64, maxMessages int32) ([]*types.Message, error)
-
-	// Get the base offset of the segment
-	BaseOffset() int64
-
-	// Get the latest offset in the segment
-	LatestOffset() int64
-
-	// Get the size of the segment
-	Size() int64
-
-	// Check if the segment is full
-	IsFull() bool
-
-	// Sync the segment to disk
-	Sync() error
-
-	// Close the segment
-	Close() error
-}
-
 // IndexStore manages offset indexes for fast lookups
 type IndexStore interface {
 	// Add an entry to the index
