@@ -82,7 +82,7 @@ type FileSegment struct {
 
 	// size metadata
 	baseOffset uint32
-	currentOffset uint32
+	nextOffset uint32
 	maxSegmentSize uint32
 	currentSize uint32
 
@@ -117,7 +117,9 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 	messageCollection := []byte{}
 	indexCollection := []byte{}
 	for _, msg := range messages {
-		msg.Offset = int64(fs.currentOffset)
+		positionBeforeWrite := fs.currentSize
+		msg.Offset = int64(fs.nextOffset)
+		fs.nextOffset++
 		messageData, err := fs.serializeMessage(msg)
 		if err != nil {
 			return fmt.Errorf("error serializing message: %v", err)
@@ -125,13 +127,11 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 		messageCollection = append(messageCollection, messageData...)
 		fs.currentSize += uint32(len(messageData))
 		fs.messageCount++
-		fs.currentOffset++
 		if fs.messageCount % fs.indexInterval == 0 {
 			// index the message
-			indexEntry := fs.serializeIndex(fs.currentOffset, fs.currentSize)
+			indexEntry := fs.serializeIndex(fs.nextOffset, positionBeforeWrite)
 			indexCollection = append(indexCollection, indexEntry...)
 		}
-
 	}
 	
 	fs.logFileWriter.Write(messageCollection)
