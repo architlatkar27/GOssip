@@ -235,32 +235,6 @@ GOssip follows an interface-first development approach:
 | `ReplicationManager` | Partition replication | `pkg/interfaces/replication.go` |
 | `PartitionManager` | Partition lifecycle | `pkg/interfaces/partition.go` |
 
-## 🎯 Kafka Limitations Addressed
-
-### 1. **ZooKeeper Dependency**
-- **Problem**: Complex external dependency, operational overhead
-- **Solution**: Embedded Raft consensus, single binary deployment
-
-### 2. **Operational Complexity** 
-- **Problem**: 200+ configuration parameters, difficult tuning
-- **Solution**: Smart defaults, auto-tuning, minimal configuration
-
-### 3. **JVM Memory Management**
-- **Problem**: GC pauses, heap tuning complexity
-- **Solution**: Go's efficient GC, predictable memory usage
-
-### 4. **Limited Query Capabilities**
-- **Problem**: Only sequential access, no indexing
-- **Solution**: Built-in indexing, SQL-like queries (Phase 3)
-
-### 5. **Schema Evolution**
-- **Problem**: Requires external schema registry
-- **Solution**: Built-in schema management (Phase 2)
-
-### 6. **Rebalancing Pain**
-- **Problem**: Stop-the-world rebalancing
-- **Solution**: Incremental rebalancing with minimal disruption
-
 ## 📊 Performance Targets
 
 | Metric | Target | Kafka Baseline |
@@ -271,20 +245,11 @@ GOssip follows an interface-first development approach:
 | Startup Time | < 5 seconds | 30+ seconds |
 | Partition Limit | 1M+ partitions | 200K partitions |
 
-## 🤝 Contributing
-
-GOssip is in early development. We welcome contributions!
-
-1. **Phase 1 Implementation**: Help implement the core interfaces
-2. **Testing**: Write comprehensive tests for interfaces
-3. **Documentation**: Improve documentation and examples
-4. **Performance**: Benchmark and optimize implementations
-
 ## 📄 License
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## 🙏 References
 
 - **Apache Kafka**: Inspiration for the messaging model
 - **HashiCorp Raft**: Reference for consensus implementation
