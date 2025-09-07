@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,7 +39,7 @@ func TestWALEntry(t *testing.T) {
 // TestNewFileBasedWALWriter tests WAL creation
 func TestNewFileBasedWALWriter(t *testing.T) {
 	// Create temporary directory
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -98,7 +97,7 @@ func TestNewFileBasedWALWriter_InvalidDir(t *testing.T) {
 
 // TestWALAppend tests appending entries to WAL
 func TestWALAppend(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -151,7 +150,7 @@ func TestWALAppend(t *testing.T) {
 
 // TestWALAppendMultiple tests appending multiple entries
 func TestWALAppendMultiple(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -199,7 +198,7 @@ func TestWALAppendMultiple(t *testing.T) {
 
 // TestWALRead tests reading entries from WAL
 func TestWALRead(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -300,7 +299,7 @@ func TestWALRead(t *testing.T) {
 
 // TestWALLatestIndex tests getting latest index
 func TestWALLatestIndex(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -352,7 +351,7 @@ func TestWALLatestIndex(t *testing.T) {
 
 // TestWALRecovery tests WAL recovery after restart
 func TestWALRecovery(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -446,7 +445,7 @@ func TestWALRecovery(t *testing.T) {
 
 // TestWALSync tests manual sync
 func TestWALSync(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -488,7 +487,7 @@ func TestWALSync(t *testing.T) {
 
 // TestWALEmptyRead tests reading from empty WAL
 func TestWALEmptyRead(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -528,7 +527,7 @@ func TestWALEmptyRead(t *testing.T) {
 
 // TestWALConcurrency tests concurrent operations
 func TestWALConcurrency(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "wal_test")
+	tempDir, err := os.MkdirTemp("", "wal_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -608,7 +607,7 @@ func TestWALConcurrency(t *testing.T) {
 
 // Benchmark tests
 func BenchmarkWALAppend(b *testing.B) {
-	tempDir, err := ioutil.TempDir("", "wal_bench")
+	tempDir, err := os.MkdirTemp("", "wal_bench")
 	if err != nil {
 		b.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -644,7 +643,7 @@ func BenchmarkWALAppend(b *testing.B) {
 }
 
 func BenchmarkWALRead(b *testing.B) {
-	tempDir, err := ioutil.TempDir("", "wal_bench")
+	tempDir, err := os.MkdirTemp("", "wal_bench")
 	if err != nil {
 		b.Fatalf("Failed to create temp dir: %v", err)
 	}
