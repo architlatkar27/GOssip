@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
+	"io"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -19,7 +22,7 @@ type Segment interface {
 	Append(messages []*types.Message) error
 
 	// Read messages from the segment
-	Read(offset int64, maxMessages int32) ([]*types.Message, error)
+	Read(offset uint32, maxMessages int32) ([]*types.Message, error)
 
 	// Get the base offset of the segment
 	BaseOffset() int64
@@ -73,33 +76,33 @@ type SegmentInfo struct {
 type FileSegment struct {
 	// file details
 	// filepath /data/topic/partition/log_base_offset.log(index_base_offset.log)
-	logFile *os.File
-	logFilePath string
-	logFileWriter *bufio.Writer
-	indexFile *os.File
-	indexFilePath string
+	logFile         *os.File
+	logFilePath     string
+	logFileWriter   *bufio.Writer
+	indexFile       *os.File
+	indexFilePath   string
 	indexFileWriter *bufio.Writer
 
 	// size metadata
-	baseOffset uint32
-	nextOffset uint32
+	baseOffset     uint32
+	nextOffset     uint32
 	maxSegmentSize uint32
-	currentSize uint32
+	currentSize    uint32
 
 	// sparse indexing
 	indexInterval int32
-	messageCount int32 // index everytime messageCount % indexInterval == 0
-	indexMapping map[int64]int64 // offset --> position in file
+	messageCount  int32           // index everytime messageCount % indexInterval == 0
+	indexMapping  map[uint32]uint32 // offset --> position in file
 
 	// topic metadata
-	topic string
+	topic     string
 	partition int32
 
 	// sync
-	mu sync.RWMutex
+	mu     sync.RWMutex
 	closed bool
 
-	createdAt time.Time
+	createdAt     time.Time
 	lastUpdatedAt time.Time
 }
 
@@ -109,8 +112,12 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 	// generate checksum
 	// serialize the message
 	// write it to file
-	// increment message count, 
+	// increment message count,
 	// index it if needed and update the in memory index
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	shouldFlush := false
 	if fs.currentSize > fs.maxSegmentSize {
 		return fmt.Errorf("this segment is full, close this segment")
 	}
@@ -127,15 +134,29 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 		messageCollection = append(messageCollection, messageData...)
 		fs.currentSize += uint32(len(messageData))
 		fs.messageCount++
-		if fs.messageCount % fs.indexInterval == 0 {
+		if fs.messageCount%fs.indexInterval == 0 {
 			// index the message
 			indexEntry := fs.serializeIndex(fs.nextOffset, positionBeforeWrite)
 			indexCollection = append(indexCollection, indexEntry...)
+			shouldFlush = true
 		}
 	}
-	
-	fs.logFileWriter.Write(messageCollection)
-	fs.indexFileWriter.Write(indexCollection)
+	if _, err := fs.logFileWriter.Write(messageCollection); err != nil {
+		return fmt.Errorf("error while writing messages to buffer: %v", err)	
+	}
+	if _, err := fs.indexFileWriter.Write(indexCollection); err != nil {
+		return fmt.Errorf("error while writing index to buffer: %v", err)	
+	}
+
+	if shouldFlush {
+		if err := fs.logFileWriter.Flush(); err != nil {
+			return fmt.Errorf("error while flushing message buffer to disk: %v", err)
+		}
+		if err := fs.logFileWriter.Flush(); err != nil {
+			return fmt.Errorf("error while flushing message buffer to disk: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -144,7 +165,7 @@ func (fs *FileSegment) serializeIndex(offset uint32, position uint32) []byte {
 	binary.BigEndian.PutUint32(indexData[0:4], offset)
 	binary.BigEndian.PutUint32(indexData[4:], position)
 	return indexData
-} 
+}
 
 func (fs *FileSegment) serializeMessage(message *types.Message) ([]byte, error) {
 	messageData, err := json.Marshal(message)
@@ -159,4 +180,101 @@ func (fs *FileSegment) serializeMessage(message *types.Message) ([]byte, error) 
 	binary.BigEndian.PutUint32(frame[4:8], checksum)
 	copy(frame[8:], messageData)
 	return frame, nil
+}
+
+func (fs *FileSegment) deserializeMessage(data []byte) (*types.Message, error) {
+	// read the first 4 bytes, convert to checksum
+	// read the rest of the bytes, 
+	// compare the checksum
+	// return the result
+
+	var message types.Message
+	var checksum uint32
+
+	checksum = binary.BigEndian.Uint32(data[0:4])
+
+	if err := json.Unmarshal(data[4:], &message); err != nil {
+		return nil, fmt.Errorf("error while unmarshaling data: %v", err)
+	}
+
+	expectedChecksum := crc32.ChecksumIEEE(data[4:])	
+	if checksum != expectedChecksum {
+		// what do we wanna do about the checksum not matching? 
+		return nil, fmt.Errorf("checksum does not match")
+	}
+
+	return &message, nil
+}
+
+func (fs *FileSegment) Read(offset uint32, maxMessages int32) ([]*types.Message, error) {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+
+	// if the offset is less than baseoffset then return error
+	if offset < fs.baseOffset || offset > fs.nextOffset {
+		return nil, fmt.Errorf("offset not present in this segment")
+	}
+	// search for the message with offset
+	offsetList := slices.Collect(maps.Keys(fs.indexMapping))
+	offsetInIndex := fs.findOffsetInIndex(offset, offsetList)
+
+	basePosition, ok := fs.indexMapping[offsetInIndex]
+	if !ok {
+		return nil, fmt.Errorf("unable to find base position to search in file")
+	}
+
+
+	// what if we have more to read than this buffer? 
+	// we will have to track what position we are on and again do a lot of 
+	// custom read?
+	// there should be a better way to handle this. 
+
+	// the better way - first use readAt to read the number of bytes 
+	// then make a buffer of that size to read the message and the checksum
+	// put this in loop
+	var messages []*types.Message
+	currentPostion := basePosition
+	for i := range(maxMessages) {
+		sizeBuffer := make([]byte, 4)
+		_, err := fs.logFile.ReadAt(sizeBuffer, int64(currentPostion))
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("error reading size of message: %v", err)
+		}
+		currentPostion += 4
+		// no need to handle EOF ig
+
+		msgSize := binary.BigEndian.Uint32(sizeBuffer)
+		buffer := make([]byte, msgSize)
+		n, err := fs.logFile.ReadAt(buffer, int64(currentPostion))
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("error reading message from segment: %v", err)
+		}
+		currentPostion += uint32(n)
+		// desrialize the messgae 
+		message, err := fs.deserializeMessage(buffer)
+		if err != nil {
+			return messages, fmt.Errorf("error while desriazlizing message %d: %v", i, err)
+		}
+		messages = append(messages, message)
+	}
+
+	return messages, nil
+}
+
+func (fs *FileSegment) findOffsetInIndex(key uint32, offsetList []uint32) uint32 {
+	// find the last offset less than or equal to key
+	var offsetValue uint32
+	beg := 0
+	end := len(offsetList) - 1
+
+	for beg <= end {
+		mid := (beg + end) / 2
+		if offsetList[mid] > key {
+			end = mid - 1
+		} else {
+			offsetValue = offsetList[mid]
+			beg = mid + 1
+		}
+	}
+	return offsetValue
 }
