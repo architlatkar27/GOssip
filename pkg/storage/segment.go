@@ -136,6 +136,7 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 		fs.messageCount++
 		if fs.messageCount%fs.indexInterval == 0 {
 			// index the message
+			fs.indexMapping[fs.nextOffset] = positionBeforeWrite
 			indexEntry := fs.serializeIndex(fs.nextOffset, positionBeforeWrite)
 			indexCollection = append(indexCollection, indexEntry...)
 			shouldFlush = true
