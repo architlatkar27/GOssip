@@ -25,13 +25,13 @@ type Segment interface {
 	Read(offset uint32, maxMessages int32) ([]*types.Message, error)
 
 	// Get the base offset of the segment
-	BaseOffset() int64
+	BaseOffset() uint32
 
 	// Get the latest offset in the segment
-	LatestOffset() int64
+	LatestOffset() uint32
 
 	// Get the size of the segment
-	Size() int64
+	Size() uint32
 
 	// Check if the segment is full
 	IsFull() bool
@@ -41,35 +41,6 @@ type Segment interface {
 
 	// Close the segment
 	Close() error
-}
-
-// SegmentStore manages individual log segments
-type SegmentStore interface {
-	// Create a new segment
-	CreateSegment(topic string, partition int32, baseOffset int64) (Segment, error)
-
-	// Open an existing segment
-	OpenSegment(topic string, partition int32, baseOffset int64) (Segment, error)
-
-	// List all segments for a topic partition
-	ListSegments(topic string, partition int32) ([]SegmentInfo, error)
-
-	// Delete a segment
-	DeleteSegment(topic string, partition int32, baseOffset int64) error
-
-	// Close all segments
-	Close() error
-}
-
-// SegmentInfo contains metadata about a segment
-type SegmentInfo struct {
-	Topic        string    `json:"topic"`
-	Partition    int32     `json:"partition"`
-	BaseOffset   int64     `json:"base_offset"`
-	LatestOffset int64     `json:"latest_offset"`
-	Size         int64     `json:"size"`
-	CreatedAt    time.Time `json:"created_at"`
-	ModifiedAt   time.Time `json:"modified_at"`
 }
 
 // implements segment interface
@@ -106,6 +77,64 @@ type FileSegment struct {
 	lastUpdatedAt time.Time
 }
 
+func (fs *FileSegment) IsFull() bool {
+	if fs.currentSize >= fs.maxSegmentSize {
+		return true
+	}
+	return false
+}
+
+func (fs *FileSegment) Sync() error {
+	if err := fs.logFileWriter.Flush(); err != nil {
+		return fmt.Errorf("error while flushing segment to disk: %v", err)
+	}
+	if err := fs.indexFileWriter.Flush(); err != nil {
+		return fmt.Errorf("error while flushing segment index to disk: %v", err)
+	}
+	return nil
+}
+
+func (fs *FileSegment) BaseOffset() uint32 {
+	return fs.baseOffset
+}
+
+func (fs *FileSegment) LatestOffset() uint32 {
+	return fs.nextOffset
+}
+
+func (fs *FileSegment) Size() uint32 {
+	return fs.currentSize
+}
+
+func (fs *FileSegment) Close() error {
+	// sync everything
+	// close files and their buffers
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	
+	if err := fs.Sync(); err != nil {
+		return fmt.Errorf("failed to sync before close: %v", err)
+	}
+
+	var closeErrors []error
+	if fs.logFile != nil {
+		if err := fs.logFile.Close(); err != nil {
+			closeErrors = append(closeErrors, err)
+		}
+	}
+	if fs.indexFile != nil {
+		if err := fs.indexFile.Close(); err != nil {
+			closeErrors = append(closeErrors, err)
+		}
+	}
+	fs.closed = true
+	if len(closeErrors) > 0 {
+		return fmt.Errorf("failed to close segment files: %v", closeErrors)
+	}
+	return nil
+
+}
+
 func (fs *FileSegment) Append(messages []*types.Message) error {
 	// check for the size constraints
 	// assign offset
@@ -114,11 +143,14 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 	// write it to file
 	// increment message count,
 	// index it if needed and update the in memory index
+	if fs.closed {
+		return fmt.Errorf("segment is closed")
+	}
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
 	shouldFlush := false
-	if fs.currentSize > fs.maxSegmentSize {
+	if fs.IsFull() {
 		return fmt.Errorf("this segment is full, close this segment")
 	}
 	messageCollection := []byte{}
@@ -136,7 +168,7 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 		fs.messageCount++
 		if fs.messageCount%fs.indexInterval == 0 {
 			// index the message
-			fs.indexMapping[fs.nextOffset] = positionBeforeWrite
+			fs.indexMapping[uint32(msg.Offset)] = positionBeforeWrite
 			indexEntry := fs.serializeIndex(fs.nextOffset, positionBeforeWrite)
 			indexCollection = append(indexCollection, indexEntry...)
 			shouldFlush = true
@@ -150,11 +182,8 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 	}
 
 	if shouldFlush {
-		if err := fs.logFileWriter.Flush(); err != nil {
-			return fmt.Errorf("error while flushing message buffer to disk: %v", err)
-		}
-		if err := fs.logFileWriter.Flush(); err != nil {
-			return fmt.Errorf("error while flushing message buffer to disk: %v", err)
+		if err := fs.Sync(); err != nil {
+			return err
 		}
 	}
 
@@ -208,11 +237,14 @@ func (fs *FileSegment) deserializeMessage(data []byte) (*types.Message, error) {
 }
 
 func (fs *FileSegment) Read(offset uint32, maxMessages int32) ([]*types.Message, error) {
+	if fs.closed {
+		return nil, fmt.Errorf("segment is closed")
+	}
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
 	// if the offset is less than baseoffset then return error
-	if offset < fs.baseOffset || offset > fs.nextOffset {
+	if offset < fs.baseOffset || offset >= fs.nextOffset {
 		return nil, fmt.Errorf("offset not present in this segment")
 	}
 	// search for the message with offset
@@ -224,15 +256,6 @@ func (fs *FileSegment) Read(offset uint32, maxMessages int32) ([]*types.Message,
 		return nil, fmt.Errorf("unable to find base position to search in file")
 	}
 
-
-	// what if we have more to read than this buffer? 
-	// we will have to track what position we are on and again do a lot of 
-	// custom read?
-	// there should be a better way to handle this. 
-
-	// the better way - first use readAt to read the number of bytes 
-	// then make a buffer of that size to read the message and the checksum
-	// put this in loop
 	var messages []*types.Message
 	currentPostion := basePosition
 	for i := range(maxMessages) {
@@ -240,6 +263,9 @@ func (fs *FileSegment) Read(offset uint32, maxMessages int32) ([]*types.Message,
 		_, err := fs.logFile.ReadAt(sizeBuffer, int64(currentPostion))
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("error reading size of message: %v", err)
+		}
+		if err == io.EOF {
+			break
 		}
 		currentPostion += 4
 		// no need to handle EOF ig
@@ -249,6 +275,9 @@ func (fs *FileSegment) Read(offset uint32, maxMessages int32) ([]*types.Message,
 		n, err := fs.logFile.ReadAt(buffer, int64(currentPostion))
 		if err != nil && err != io.EOF {
 			return nil, fmt.Errorf("error reading message from segment: %v", err)
+		}
+		if err == io.EOF{
+			break
 		}
 		currentPostion += uint32(n)
 		// desrialize the messgae 
