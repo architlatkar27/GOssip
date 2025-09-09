@@ -67,7 +67,7 @@ type FileSegment struct {
 
 	// topic metadata
 	topic     string
-	partition int32
+	partition uint32
 
 	// sync
 	mu     sync.RWMutex
@@ -186,6 +186,7 @@ func (fs *FileSegment) Append(messages []*types.Message) error {
 			return err
 		}
 	}
+	fs.lastUpdatedAt = time.Now()
 
 	return nil
 }
